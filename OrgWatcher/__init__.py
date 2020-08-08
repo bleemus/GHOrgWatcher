@@ -6,7 +6,7 @@ import azure.functions as func
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info('Python HTTP trigger function processed a request.')
+    logging.info('Python HTTP trigger function processed a request.  Released wtih GitHub Actions! :)')
 
     if not "signature" in os.environ:
         return func.HttpResponse("Function secret not configured!", status_code=500)
