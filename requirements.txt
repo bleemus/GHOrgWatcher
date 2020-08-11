@@ -1,1 +1,5 @@
 azure-functions
+PyJWT
+requests
+azure-keyvault
+azure-identity

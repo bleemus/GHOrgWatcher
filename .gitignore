@@ -128,3 +128,4 @@ obj
 appsettings.json
 local.settings.json
 .python_packages
+.vscode/repoprotector.2020-08-08.private-key.pem
