@@ -31,6 +31,8 @@ This application requires the following app settings to exist and be properly co
 * Finally, the webhook secret in the GitHub app will be stored in this setting:
     * webhook_secret
 
+For this to run successfully locally, place all of these settings in the local.settings.json file in the local copy of the Azure function on the development machine.
+
 ## GitHub App
 
 This API is meant to be deployed as a webhook endpoint to a GitHub app.
