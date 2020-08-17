@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import requests
@@ -7,7 +8,9 @@ import jwt
 import json
 from datetime import datetime, timedelta, timezone
 
-import azure.keyvault.secrets as azkv
+import azure.keyvault.secrets as azsecrets
+import azure.keyvault.keys as azkeys
+from azure.keyvault.keys.crypto import CryptographyClient
 import azure.identity as azid
 import azure.functions as func
 
@@ -75,21 +78,39 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse("Success!", status_code=200)
 
 def get_github_auth_token():
+    # credentials for AKV come from environment settings
     credential = azid.DefaultAzureCredential()
-    client = azkv.SecretClient(vault_url=os.environ['key_vault_uri'], credential=credential)
 
-    key = client.get_secret(os.environ['key_name'])
+    akvURL = '{0}keys/{1}/{2}'.format(os.environ['key_vault_uri'], os.environ['key_name'], os.environ['key_version'])
 
-    message = {
-        'iss': os.environ['github_appID'],
-        'iat': (datetime.now(timezone.utc)),
-        'exp': (datetime.now(timezone.utc) + timedelta(minutes=1)),
+    # built JWT token
+    header = {
+        'alg': 'RS256',
+        'kid': akvURL,
+        'typ': 'JWT',
     }
 
-    compact_jws = jwt.encode(message, key.value.replace("\\n", "\n").encode(), algorithm='RS256')
+    payload = {
+        'iss': os.environ['github_appID'],
+        'iat': int(datetime.now(timezone.utc).timestamp()),
+        'exp': int((datetime.now(timezone.utc) + timedelta(minutes=1)).timestamp()),
+    }
+
+    p = []
+
+    p.append(base64.urlsafe_b64encode(json.dumps(header).encode('utf-8')))
+    p.append(base64.urlsafe_b64encode(json.dumps(payload).encode('utf-8')))
+
+    digest = hashlib.sha256(b".".join(p)).digest()
+    cryptoClient = CryptographyClient(akvURL, credential)
+    result = cryptoClient.sign(azkeys.crypto.SignatureAlgorithm.rs256, digest)
+
+    p.append(base64.urlsafe_b64encode(result.signature).replace(b"=", b""))
+
+    token = b".".join(p).decode()
 
     headers = {
-        "Authorization": "Bearer " + compact_jws.decode(),
+        "Authorization": "Bearer " + token,
         "Accept": "application/vnd.github.machine-man-preview+json",
     }
 
