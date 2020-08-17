@@ -78,40 +78,39 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse("Success!", status_code=200)
 
 def get_github_auth_token():
+    # credentials for AKV come from environment settings
     credential = azid.DefaultAzureCredential()
 
+    akvURL = '{0}keys/{1}/{2}'.format(os.environ['key_vault_uri'], os.environ['key_name'], os.environ['key_version'])
+
+    # built JWT token
     header = {
-        'Alg': 'RS256',
-        'Kid': 'https://kv-ghapitest.vault.azure.net/keys/repoprotector/fa27e49e8ef74a54863c5497a6016a47',
-        'Typ': 'JWT',
+        'alg': 'RS256',
+        'kid': akvURL,
+        'typ': 'JWT',
     }
 
-    message = {
+    payload = {
         'iss': os.environ['github_appID'],
         'iat': int(datetime.now(timezone.utc).timestamp()),
         'exp': int((datetime.now(timezone.utc) + timedelta(minutes=1)).timestamp()),
     }
 
-    payload = base64.urlsafe_b64encode(json.dumps(header).encode()).decode() + "." + base64.urlsafe_b64encode(json.dumps(message).encode()).decode()
-    digest = hashlib.sha256(payload.encode()).digest()
+    p = []
 
-    cryptoClient = CryptographyClient('https://kv-ghapitest.vault.azure.net/keys/repoprotector/fa27e49e8ef74a54863c5497a6016a47', credential)
+    p.append(base64.urlsafe_b64encode(json.dumps(header).encode('utf-8')))
+    p.append(base64.urlsafe_b64encode(json.dumps(payload).encode('utf-8')))
+
+    digest = hashlib.sha256(b".".join(p)).digest()
+    cryptoClient = CryptographyClient(akvURL, credential)
     result = cryptoClient.sign(azkeys.crypto.SignatureAlgorithm.rs256, digest)
-    kv_jws = (base64.urlsafe_b64encode(json.dumps(header).encode()).decode() + "." + base64.urlsafe_b64encode(json.dumps(message).encode()).decode() + '.' + base64.urlsafe_b64encode(result.signature.decode('utf-8', 'ignore').encode()).decode())
-    kv_jws.replace('==', '')
 
-    client = azsecrets.SecretClient(vault_url=os.environ['key_vault_uri'], credential=credential)
-    key = client.get_secret(os.environ['key_name'])
+    p.append(base64.urlsafe_b64encode(result.signature).replace(b"=", b""))
 
-    message = {
-        'iss': os.environ['github_appID'],
-        'iat': (datetime.now(timezone.utc)),
-        'exp': (datetime.now(timezone.utc) + timedelta(minutes=1)),
-    }
-    compact_jws = jwt.encode(message, key.value.replace("\\n", "\n").encode(), algorithm='RS256')
+    token = b".".join(p).decode()
 
     headers = {
-        "Authorization": "Bearer " + kv_jws.replace('==', ''),
+        "Authorization": "Bearer " + token,
         "Accept": "application/vnd.github.machine-man-preview+json",
     }
 
