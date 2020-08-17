@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import requests
@@ -7,7 +8,9 @@ import jwt
 import json
 from datetime import datetime, timedelta, timezone
 
-import azure.keyvault.secrets as azkv
+import azure.keyvault.secrets as azsecrets
+import azure.keyvault.keys as azkeys
+from azure.keyvault.keys.crypto import CryptographyClient
 import azure.identity as azid
 import azure.functions as func
 
@@ -76,8 +79,28 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
 def get_github_auth_token():
     credential = azid.DefaultAzureCredential()
-    client = azkv.SecretClient(vault_url=os.environ['key_vault_uri'], credential=credential)
 
+    header = {
+        'Alg': 'RS256',
+        'Kid': 'https://kv-ghapitest.vault.azure.net/keys/repoprotector/fa27e49e8ef74a54863c5497a6016a47',
+        'Typ': 'JWT',
+    }
+
+    message = {
+        'iss': os.environ['github_appID'],
+        'iat': int(datetime.now(timezone.utc).timestamp()),
+        'exp': int((datetime.now(timezone.utc) + timedelta(minutes=1)).timestamp()),
+    }
+
+    payload = base64.urlsafe_b64encode(json.dumps(header).encode()).decode() + "." + base64.urlsafe_b64encode(json.dumps(message).encode()).decode()
+    digest = hashlib.sha256(payload.encode()).digest()
+
+    cryptoClient = CryptographyClient('https://kv-ghapitest.vault.azure.net/keys/repoprotector/fa27e49e8ef74a54863c5497a6016a47', credential)
+    result = cryptoClient.sign(azkeys.crypto.SignatureAlgorithm.rs256, digest)
+    kv_jws = (base64.urlsafe_b64encode(json.dumps(header).encode()).decode() + "." + base64.urlsafe_b64encode(json.dumps(message).encode()).decode() + '.' + base64.urlsafe_b64encode(result.signature.decode('utf-8', 'ignore').encode()).decode())
+    kv_jws.replace('==', '')
+
+    client = azsecrets.SecretClient(vault_url=os.environ['key_vault_uri'], credential=credential)
     key = client.get_secret(os.environ['key_name'])
 
     message = {
@@ -85,11 +108,10 @@ def get_github_auth_token():
         'iat': (datetime.now(timezone.utc)),
         'exp': (datetime.now(timezone.utc) + timedelta(minutes=1)),
     }
-
     compact_jws = jwt.encode(message, key.value.replace("\\n", "\n").encode(), algorithm='RS256')
 
     headers = {
-        "Authorization": "Bearer " + compact_jws.decode(),
+        "Authorization": "Bearer " + kv_jws.replace('==', ''),
         "Accept": "application/vnd.github.machine-man-preview+json",
     }
 
